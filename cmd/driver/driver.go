@@ -5,21 +5,33 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/joho/godotenv"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
+// struct to hold the neo4j config data
 type Config struct {
 	url      string
 	username string
 	password string
 }
 
+// load the config details from env
 func LoadConfig() Config {
-	return Config{url: os.Getenv("NEO4J_url"),
-		username: os.Getenv("NEO4J_username"),
-		password: os.Getenv("NEO4J_password")}
+
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Errorf("error loading env")
+	}
+	cfg := Config{
+		url:      os.Getenv("NEO4J_URL"),
+		username: os.Getenv("NEO4J_USERNAME"),
+		password: os.Getenv("NEO4J_PASSWORD"),
+	}
+	return cfg
 }
 
+// initialise a neo4j driver
 func Connect(ctx context.Context, cfg Config) (neo4j.DriverWithContext, error) {
 	driver, err := neo4j.NewDriverWithContext(
 		cfg.url,
