@@ -98,11 +98,12 @@ jobs:
       - name: Download baseline dump from GitHub Release
         run: |
           mkdir -p dumps
-          echo "→ Downloading ${{ env.DUMP_URL }}..."
           curl -L \
-            -H "Accept: application/octet-stream" \
+            --retry 3 \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "${{ env.DUMP_URL }}" \
             -o dumps/recommendations-50.zip
+          file dumps/recommendations-50.zip
           echo "✓ Downloaded: $(du -sh dumps/recommendations-50.zip | cut -f1)"
 
       - name: Unzip dump
