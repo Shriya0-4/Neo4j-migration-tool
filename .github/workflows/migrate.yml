@@ -3,10 +3,12 @@ name: GraphMigrate CI
 on:
   push:
     branches:
+      - main
       - master
       - "feature/**"
   pull_request:
     branches:
+      - main
       - master
   workflow_dispatch:
     inputs:
@@ -26,9 +28,7 @@ env:
   NEO4J_PASSWORD: "migration"
   NEO4J_DATABASE: "neo4j"
   MIGRATIONS_DIR: "./migrations"
-  # Direct download URL for the baseline dump zip from GitHub Release
   DUMP_URL: "https://github.com/Shriya0-4/Neo4j-migration-tool/releases/download/v0-baseline/recommendations-50.zip"
-  # The actual .dump filename inside the zip
   DUMP_FILENAME: "recommendations-50.dump"
 
 jobs:
@@ -38,6 +38,9 @@ jobs:
   lint-and-test:
     name: Lint & Unit Tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tool
 
     steps:
       - name: Checkout code
@@ -56,7 +59,7 @@ jobs:
         run: go vet ./...
 
       - name: Unit tests
-        run: go test ./cmd/internal/loader/... -v -count=1
+        run: go test ./internal/loader/... -v -count=1
 
       - name: Check formatting
         run: |
@@ -74,6 +77,9 @@ jobs:
     name: Migration Pipeline
     runs-on: ubuntu-latest
     needs: lint-and-test
+    defaults:
+      run:
+        working-directory: tool
 
     steps:
       - name: Checkout code
@@ -94,84 +100,89 @@ jobs:
           go build -o bin/graphmigrate .
           echo "✓ binary built"
 
+      # ── Step 1: Download and unzip dump ───────────────
       - name: Download baseline dump from GitHub Release
         run: |
           mkdir -p dumps
           wget --no-verbose \
-            "https://github.com/Shriya0-4/Neo4j-migration-tool/releases/download/v0-baseline/recommendations-50.zip" \
+            "${{ env.DUMP_URL }}" \
             -O dumps/recommendations-50.zip
+          echo "✓ Downloaded: $(du -sh dumps/recommendations-50.zip | cut -f1)"
           file dumps/recommendations-50.zip
-          echo "Size: $(du -sh dumps/recommendations-50.zip | cut -f1)"
 
       - name: Unzip dump
         run: |
-          cd dumps
-          unzip -o recommendations-50.zip
-          echo "✓ Contents after unzip:"
+          cd dumps && unzip -o recommendations-50.zip
+          echo "✓ Contents:"
           ls -lh
 
       - name: Verify dump file exists
         run: |
           if [ ! -f "dumps/${{ env.DUMP_FILENAME }}" ]; then
-            echo "ERROR: Expected dumps/${{ env.DUMP_FILENAME }} but not found."
-            echo "Files in dumps/:"
+            echo "ERROR: Expected dumps/${{ env.DUMP_FILENAME }}"
             ls -lh dumps/
             exit 1
           fi
-          echo "✓ Dump file verified: dumps/${{ env.DUMP_FILENAME }} ($(du -sh dumps/${{ env.DUMP_FILENAME }} | cut -f1))"
+          echo "✓ Dump verified: $(du -sh dumps/${{ env.DUMP_FILENAME }} | cut -f1)"
 
-      # ── Step 2: Start Neo4j ────────────────────────────
-      - name: Start Neo4j Docker container
+      # ── Step 2: Load dump BEFORE starting Neo4j ───────
+      # Key fix: run neo4j-admin load in a temporary container
+      # that shares the same data volume, BEFORE the main Neo4j
+      # container starts. This avoids the stop/start problem entirely.
+      - name: Create Neo4j data volume
+        run: docker volume create neo4j-data
+
+      - name: Load dump into volume using neo4j-admin
+        run: |
+          docker run --rm \
+            -v neo4j-data:/data \
+            -v ${{ github.workspace }}/tool/dumps:/dumps \
+            neo4j:5.18.0-community \
+            neo4j-admin database load neo4j \
+              --from-path=/dumps/${{ env.DUMP_FILENAME }} \
+              --overwrite-destination=true
+          echo "✓ Dump loaded into volume"
+
+      # ── Step 3: Start Neo4j with pre-loaded volume ────
+      - name: Start Neo4j with pre-loaded data
         run: |
           docker run -d \
             --name neo4j \
             -p 7474:7474 \
             -p 7687:7687 \
+            -v neo4j-data:/data \
             -e NEO4J_AUTH=${{ env.NEO4J_USERNAME }}/${{ env.NEO4J_PASSWORD }} \
             -e NEO4J_server_memory_heap_initial__size=512m \
             -e NEO4J_server_memory_heap_max__size=1g \
-            -v ${{ github.workspace }}/dumps:/dumps \
             neo4j:5.18.0-community
-          echo "✓ Neo4j container started"
+          echo "✓ Neo4j started with pre-loaded data"
 
-      - name: Wait for Neo4j HTTP to be ready
+      - name: Wait for Neo4j to be ready
         run: |
           echo "Waiting for Neo4j..."
-          for i in $(seq 1 40); do
+          for i in $(seq 1 50); do
             if curl -sf http://localhost:7474 > /dev/null 2>&1; then
               echo "✓ Neo4j ready (attempt $i)"
               break
             fi
-            echo "  attempt $i/40 — waiting 3s..."
+            echo "  attempt $i/50 — waiting 3s..."
             sleep 3
           done
 
-      # ── Step 3: Load dump ──────────────────────────────
-      - name: Stop Neo4j database for dump load
+      - name: Verify data loaded correctly
         run: |
-          docker exec neo4j neo4j stop || true
-          sleep 5
-          echo "✓ Neo4j stopped"
-
-      - name: Load dump using neo4j-admin
-        run: |
-          docker exec neo4j neo4j-admin database load neo4j \
-            --from-path=/dumps/${{ env.DUMP_FILENAME }} \
-            --overwrite-destination=true
-          echo "✓ Dump loaded successfully"
-
-      - name: Restart Neo4j after dump load
-        run: |
-          docker exec neo4j neo4j start
-          echo "Waiting for Neo4j to come back online..."
-          for i in $(seq 1 40); do
-            if curl -sf http://localhost:7474 > /dev/null 2>&1; then
-              echo "✓ Neo4j back online (attempt $i)"
-              break
-            fi
-            echo "  attempt $i/40 — waiting 3s..."
-            sleep 3
-          done
+          curl -sf -X POST http://localhost:7474/db/neo4j/tx/commit \
+            -H "Content-Type: application/json" \
+            -u "${{ env.NEO4J_USERNAME }}:${{ env.NEO4J_PASSWORD }}" \
+            -d '{"statements":[{"statement":"MATCH (n) RETURN count(n) AS total"}]}' \
+            | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          total = data['results'][0]['data'][0]['row'][0]
+          print(f'✓ Database loaded — {total} nodes found')
+          if total == 0:
+              print('WARNING: No nodes found — dump may not have loaded correctly')
+          "
 
       # ── Step 4: Pre-migration snapshot ────────────────
       - name: Capture pre-migration snapshot
@@ -260,13 +271,13 @@ jobs:
           echo "════════════════════════════════════════"
           cat reports/migration_report_*.txt 2>/dev/null || echo "No report found"
 
-      # ── Step 10: Store all artifacts (90 days) ────────
+      # ── Step 10: Upload all artifacts (90 days) ───────
       - name: Upload migration report
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: migration-report-${{ github.run_id }}
-          path: reports/
+          path: tool/reports/
           retention-days: 90
 
       - name: Upload baseline dump zip
@@ -274,7 +285,7 @@ jobs:
         if: always()
         with:
           name: dump-baseline-${{ github.run_id }}
-          path: dumps/recommendations-50.zip
+          path: tool/dumps/recommendations-50.zip
           retention-days: 90
 
       - name: Upload post-migration Cypher dump
@@ -282,7 +293,7 @@ jobs:
         if: always()
         with:
           name: dump-post-migration-${{ github.run_id }}
-          path: dumps/post_migration_dump.cypher
+          path: tool/dumps/post_migration_dump.cypher
           retention-days: 90
 
       - name: Upload snapshots
@@ -290,7 +301,7 @@ jobs:
         if: always()
         with:
           name: db-snapshots-${{ github.run_id }}
-          path: snapshots/
+          path: tool/snapshots/
           retention-days: 90
 
       - name: Upload migration logs
@@ -299,8 +310,8 @@ jobs:
         with:
           name: migration-logs-${{ github.run_id }}
           path: |
-            migration_output.log
-            migration_status.log
+            tool/migration_output.log
+            tool/migration_status.log
           retention-days: 90
 
       # ── Step 11: Fail if migration failed ─────────────
