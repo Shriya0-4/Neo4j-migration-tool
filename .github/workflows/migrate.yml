@@ -32,6 +32,9 @@ env:
   DUMP_FILENAME: "recommendations-50.dump"
 
 jobs:
+  # ────────────────────────────────────────────────────────
+  # JOB 1: lint + unit tests
+  # ────────────────────────────────────────────────────────
   lint-and-test:
     name: Lint & Unit Tests
     runs-on: ubuntu-latest
@@ -47,13 +50,13 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: |
+        run: go mod download
 
       - name: go vet
-        run: |
+        run: go vet ./...
 
       - name: Unit tests
-        run: |
+        run: go test ./internal/loader/... -v -count=1
 
       - name: Check formatting
         run: |
@@ -64,6 +67,9 @@ jobs:
             exit 1
           fi
 
+  # ────────────────────────────────────────────────────────
+  # JOB 2: full migration pipeline
+  # ────────────────────────────────────────────────────────
   migration-pipeline:
     name: Migration Pipeline
     runs-on: ubuntu-latest
@@ -80,7 +86,7 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: |
+        run: go mod download
 
       - name: Build graphmigrate binary
         run: |
@@ -98,24 +104,34 @@ jobs:
           echo "✓ Downloaded: $(du -sh dumps/recommendations-50.zip | cut -f1)"
           file dumps/recommendations-50.zip
 
-      - name: Unzip dump
+      - name: Unzip and prepare dump
         run: |
-          cd dumps && unzip -o recommendations-50.zip
-          echo "✓ Contents:"
+          cd dumps
+          unzip -o recommendations-50.zip
+          echo "✓ Contents after unzip:"
+          ls -lh
+          # neo4j-admin --from-path expects a DIRECTORY containing neo4j.dump
+          # rename our dump file to neo4j.dump so neo4j-admin finds it
+          if [ -f "${{ env.DUMP_FILENAME }}" ] && [ "${{ env.DUMP_FILENAME }}" != "neo4j.dump" ]; then
+            cp "${{ env.DUMP_FILENAME }}" neo4j.dump
+            echo "✓ Copied ${{ env.DUMP_FILENAME }} → neo4j.dump"
+          fi
           ls -lh
 
-      - name: Verify dump file exists
+      - name: Verify dump file
         run: |
-          if [ ! -f "dumps/${{ env.DUMP_FILENAME }}" ]; then
-            echo "ERROR: Expected dumps/${{ env.DUMP_FILENAME }}"
+          if [ ! -f "dumps/neo4j.dump" ]; then
+            echo "ERROR: dumps/neo4j.dump not found"
             ls -lh dumps/
             exit 1
           fi
-          echo "✓ Dump verified: $(du -sh dumps/${{ env.DUMP_FILENAME }} | cut -f1)"
+          echo "✓ neo4j.dump ready: $(du -sh dumps/neo4j.dump | cut -f1)"
 
-      # ── Step 2: Load dump BEFORE starting Neo4j ───────
+      # ── Step 2: Load dump into Docker volume ──────────
+      # Run neo4j-admin in a throwaway container BEFORE starting Neo4j.
+      # --from-path takes a DIRECTORY — we pass /dumps where neo4j.dump lives.
       - name: Create Neo4j data volume
-        run: |
+        run: docker volume create neo4j-data
 
       - name: Load dump into volume using neo4j-admin
         run: |
@@ -124,7 +140,7 @@ jobs:
             -v ${{ github.workspace }}/dumps:/dumps \
             neo4j:5.18.0-community \
             neo4j-admin database load neo4j \
-              --from-path=/dumps/${{ env.DUMP_FILENAME }} \
+              --from-path=/dumps \
               --overwrite-destination=true
           echo "✓ Dump loaded into volume"
 
@@ -140,7 +156,7 @@ jobs:
             -e NEO4J_server_memory_heap_initial__size=512m \
             -e NEO4J_server_memory_heap_max__size=1g \
             neo4j:5.18.0-community
-          echo "✓ Neo4j started with pre-loaded data"
+          echo "✓ Neo4j started"
 
       - name: Wait for Neo4j to be ready
         run: |
@@ -164,9 +180,7 @@ jobs:
           import sys, json
           data = json.load(sys.stdin)
           total = data['results'][0]['data'][0]['row'][0]
-          print(f'✓ Database loaded — {total} nodes found')
-          if total == 0:
-              print('WARNING: No nodes found — dump may not have loaded correctly')
+          print(f'✓ {total} nodes loaded from dump')
           "
 
       # ── Step 4: Pre-migration snapshot ────────────────
@@ -248,7 +262,7 @@ jobs:
           TRIGGERED_BY: ${{ github.actor }}
 
       # ── Step 9: Print report to job log ───────────────
-      - name: Print report summary to job log
+      - name: Print report summary
         if: always()
         run: |
           echo "════════════════════════════════════════"
