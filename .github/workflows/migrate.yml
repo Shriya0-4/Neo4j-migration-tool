@@ -32,15 +32,9 @@ env:
   DUMP_FILENAME: "recommendations-50.dump"
 
 jobs:
-  # ────────────────────────────────────────────────────────
-  # JOB 1: lint + unit tests (no Neo4j needed)
-  # ────────────────────────────────────────────────────────
   lint-and-test:
     name: Lint & Unit Tests
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: tool
 
     steps:
       - name: Checkout code
@@ -53,13 +47,13 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: go mod download
+        run: |
 
       - name: go vet
-        run: go vet ./...
+        run: |
 
       - name: Unit tests
-        run: go test ./internal/loader/... -v -count=1
+        run: |
 
       - name: Check formatting
         run: |
@@ -70,16 +64,10 @@ jobs:
             exit 1
           fi
 
-  # ────────────────────────────────────────────────────────
-  # JOB 2: full migration pipeline
-  # ────────────────────────────────────────────────────────
   migration-pipeline:
     name: Migration Pipeline
     runs-on: ubuntu-latest
     needs: lint-and-test
-    defaults:
-      run:
-        working-directory: tool
 
     steps:
       - name: Checkout code
@@ -92,7 +80,7 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: go mod download
+        run: |
 
       - name: Build graphmigrate binary
         run: |
@@ -126,17 +114,14 @@ jobs:
           echo "✓ Dump verified: $(du -sh dumps/${{ env.DUMP_FILENAME }} | cut -f1)"
 
       # ── Step 2: Load dump BEFORE starting Neo4j ───────
-      # Key fix: run neo4j-admin load in a temporary container
-      # that shares the same data volume, BEFORE the main Neo4j
-      # container starts. This avoids the stop/start problem entirely.
       - name: Create Neo4j data volume
-        run: docker volume create neo4j-data
+        run: |
 
       - name: Load dump into volume using neo4j-admin
         run: |
           docker run --rm \
             -v neo4j-data:/data \
-            -v ${{ github.workspace }}/tool/dumps:/dumps \
+            -v ${{ github.workspace }}/dumps:/dumps \
             neo4j:5.18.0-community \
             neo4j-admin database load neo4j \
               --from-path=/dumps/${{ env.DUMP_FILENAME }} \
@@ -277,7 +262,7 @@ jobs:
         if: always()
         with:
           name: migration-report-${{ github.run_id }}
-          path: tool/reports/
+          path: reports/
           retention-days: 90
 
       - name: Upload baseline dump zip
@@ -285,7 +270,7 @@ jobs:
         if: always()
         with:
           name: dump-baseline-${{ github.run_id }}
-          path: tool/dumps/recommendations-50.zip
+          path: dumps/recommendations-50.zip
           retention-days: 90
 
       - name: Upload post-migration Cypher dump
@@ -293,7 +278,7 @@ jobs:
         if: always()
         with:
           name: dump-post-migration-${{ github.run_id }}
-          path: tool/dumps/post_migration_dump.cypher
+          path: dumps/post_migration_dump.cypher
           retention-days: 90
 
       - name: Upload snapshots
@@ -301,7 +286,7 @@ jobs:
         if: always()
         with:
           name: db-snapshots-${{ github.run_id }}
-          path: tool/snapshots/
+          path: snapshots/
           retention-days: 90
 
       - name: Upload migration logs
@@ -310,8 +295,8 @@ jobs:
         with:
           name: migration-logs-${{ github.run_id }}
           path: |
-            tool/migration_output.log
-            tool/migration_status.log
+            migration_output.log
+            migration_status.log
           retention-days: 90
 
       # ── Step 11: Fail if migration failed ─────────────
