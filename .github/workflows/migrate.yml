@@ -94,7 +94,7 @@ jobs:
           go build -o bin/graphmigrate .
           echo "✓ binary built"
 
-     - name: Download baseline dump from GitHub Release
+      - name: Download baseline dump from GitHub Release
         run: |
           mkdir -p dumps
           wget --no-verbose \
@@ -147,8 +147,6 @@ jobs:
           done
 
       # ── Step 3: Load dump ──────────────────────────────
-      # neo4j-admin database load requires the database to be stopped.
-      # We stop it, load the dump by exact filename, then restart.
       - name: Stop Neo4j database for dump load
         run: |
           docker exec neo4j neo4j stop || true
