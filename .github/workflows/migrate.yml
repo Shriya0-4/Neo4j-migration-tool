@@ -56,7 +56,7 @@ jobs:
         run: go vet ./...
 
       - name: Unit tests
-        run: go test ./internal/loader/... -v -count=1
+        run: go test ./cmd/internal/loader/... -v -count=1
 
       - name: Check formatting
         run: |
