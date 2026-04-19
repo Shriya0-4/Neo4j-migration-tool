@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/shriya0_4/graphmigrate/cmd/db"
-
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +25,7 @@ Only run this if you are sure no other migration is currently running.`,
 		}
 
 		log.Info("migration lock released successfully")
-		fmt.Println("\n  ✓ Migration lock removed. You may now run migrations.\n")
+		fmt.Println("  ✓ Migration lock removed. You may now run migrations.")
 		return nil
 	},
 }
