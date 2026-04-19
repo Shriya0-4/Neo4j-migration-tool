@@ -3,11 +3,11 @@ name: GraphMigrate CI
 on:
   push:
     branches:
-      - main
+      - master
       - "feature/**"
   pull_request:
     branches:
-      - main
+      - master
   workflow_dispatch:
     inputs:
       dry_run:
@@ -23,7 +23,7 @@ env:
   GO_VERSION: "1.22"
   NEO4J_URI: "bolt://localhost:7687"
   NEO4J_USERNAME: "neo4j"
-  NEO4J_PASSWORD: "testpassword"
+  NEO4J_PASSWORD: "migration"
   NEO4J_DATABASE: "neo4j"
   MIGRATIONS_DIR: "./migrations"
   # Direct download URL for the baseline dump zip from GitHub Release
