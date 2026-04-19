@@ -11,8 +11,8 @@ import (
 
 	"github.com/shriya0_4/graphmigrate/cmd/internal/loader"
 	"github.com/shriya0_4/graphmigrate/cmd/internal/logger"
-	"github.com/shriya0_4/graphmigrate/migrations"
 	"github.com/shriya0_4/graphmigrate/cmd/internal/runner"
+	"github.com/shriya0_4/graphmigrate/migrations"
 )
 
 var migrateCmd = &cobra.Command{
