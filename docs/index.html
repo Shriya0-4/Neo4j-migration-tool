@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GraphMigrate — Neo4j Migration CLI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #0a0a0a;
+      --surface:   #111111;
+      --border:    #1e1e1e;
+      --border2:   #2a2a2a;
+      --green:     #00ff87;
+      --green-dim: #00cc6a;
+      --green-bg:  rgba(0,255,135,0.04);
+      --yellow:    #ffd60a;
+      --red:       #ff453a;
+      --cyan:      #64d2ff;
+      --text:      #e8e8e8;
+      --muted:     #666;
+      --muted2:    #444;
+    }
+ 
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+ 
+    html { scroll-behavior: smooth; }
+ 
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      line-height: 1.7;
+      overflow-x: hidden;
+    }
+ 
+    /* ── SCANLINE OVERLAY ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.03) 2px,
+        rgba(0,0,0,0.03) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+ 
+    /* ── NOISE TEXTURE ── */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      opacity: 0.018;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 9998;
+    }
+ 
+    /* ── LAYOUT ── */
+    .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+ 
+    /* ── NAV ── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10,10,10,0.92);
+      backdrop-filter: blur(12px);
+    }
+ 
+    nav .inner {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+ 
+    .nav-logo {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 15px;
+      color: var(--green);
+      letter-spacing: 0.05em;
+    }
+ 
+    .nav-logo span { color: var(--muted); font-weight: 400; }
+ 
+    nav ul {
+      display: flex;
+      gap: 28px;
+      list-style: none;
+    }
+ 
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      transition: color 0.2s;
+    }
+ 
+    nav a:hover { color: var(--green); }
+ 
+    /* ── HERO ── */
+    .hero {
+      padding: 140px 0 80px;
+      border-bottom: 1px solid var(--border);
+      position: relative;
+      overflow: hidden;
+    }
+ 
+    .hero-grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 40px 40px;
+      opacity: 0.3;
+      mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent);
+    }
+ 
+    .hero-eyebrow {
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--green);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+ 
+    .hero-eyebrow::before {
+      content: '';
+      display: block;
+      width: 24px;
+      height: 1px;
+      background: var(--green);
+    }
+ 
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: clamp(40px, 6vw, 72px);
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+      margin-bottom: 24px;
+    }
+ 
+    h1 .accent { color: var(--green); }
+    h1 .dim    { color: var(--muted2); }
+ 
+    .hero-sub {
+      font-size: 15px;
+      color: var(--muted);
+      max-width: 520px;
+      line-height: 1.8;
+      margin-bottom: 40px;
+    }
+ 
+    .hero-sub strong { color: var(--text); font-weight: 500; }
+ 
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+ 
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      text-decoration: none;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+      cursor: pointer;
+    }
+ 
+    .btn-primary {
+      background: var(--green);
+      color: #000;
+      font-weight: 700;
+    }
+ 
+    .btn-primary:hover {
+      background: var(--green-dim);
+      transform: translateY(-1px);
+    }
+ 
+    .btn-ghost {
+      border-color: var(--border2);
+      color: var(--muted);
+    }
+ 
+    .btn-ghost:hover {
+      border-color: var(--green);
+      color: var(--green);
+    }
+ 
+    .hero-stats {
+      display: flex;
+      gap: 40px;
+      margin-top: 60px;
+      padding-top: 40px;
+      border-top: 1px solid var(--border);
+    }
+ 
+    .stat-val {
+      font-family: 'Syne', sans-serif;
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--green);
+      display: block;
+    }
+ 
+    .stat-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+ 
+    /* ── TERMINAL ── */
+    .terminal-wrap {
+      padding: 60px 0;
+      border-bottom: 1px solid var(--border);
+    }
+ 
+    .section-label {
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+ 
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+ 
+    .terminal {
+      background: #0d0d0d;
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03);
+    }
+ 
+    .terminal-bar {
+      background: #1a1a1a;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+ 
+    .dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+    }
+ 
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #febc2e; }
+    .dot-g { background: #28c840; }
+ 
+    .terminal-title {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+    }
+ 
+    .terminal-body {
+      padding: 24px;
+      font-size: 13px;
+      line-height: 1.8;
+      overflow-x: auto;
+    }
+ 
+    .t-prompt { color: var(--green); }
+    .t-cmd    { color: var(--text); }
+    .t-info   { color: var(--cyan); }
+    .t-ok     { color: var(--green); }
+    .t-warn   { color: var(--yellow); }
+    .t-err    { color: var(--red); }
+    .t-dim    { color: var(--muted); }
+    .t-bold   { font-weight: 700; }
+    .t-blank  { display: block; height: 8px; }
+ 
+    /* typing animation */
+    .type-line {
+      overflow: hidden;
+      white-space: nowrap;
+      animation: typing 0.5s steps(40) forwards;
+      width: 0;
+    }
+ 
+    @keyframes typing {
+      to { width: 100%; }
+    }
+ 
+    /* ── ARCHITECTURE ── */
+    .arch-wrap {
+      padding: 60px 0;
+      border-bottom: 1px solid var(--border);
+    }
+ 
+    .arch-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 32px;
+    }
+ 
+    .arch-cell {
+      background: var(--surface);
+      padding: 28px;
+      transition: background 0.2s;
+    }
+ 
+    .arch-cell:hover { background: var(--green-bg); }
+ 
+    .arch-cell-label {
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--green);
+      margin-bottom: 8px;
+    }
+ 
+    .arch-cell-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+ 
+    .arch-cell p {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+ 
+    /* ── MIGRATIONS TABLE ── */
+    .migrations-wrap {
+      padding: 60px 0;
+      border-bottom: 1px solid var(--border);
+    }
+ 
+    .mig-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+ 
+    .mig-table th {
+      text-align: left;
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border2);
+    }
+ 
+    .mig-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      vertical-align: top;
+    }
+ 
+    .mig-table tr:hover td { background: var(--green-bg); }
+ 
+    .mig-version {
+      color: var(--green);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+ 
+    .mig-name { color: var(--text); }
+ 
+    .mig-type {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 10px;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+ 
+    .type-data   { background: rgba(100,210,255,0.1); color: var(--cyan); border: 1px solid rgba(100,210,255,0.2); }
+    .type-schema { background: rgba(255,214,10,0.1);  color: var(--yellow); border: 1px solid rgba(255,214,10,0.2); }
+    .type-both   { background: rgba(0,255,135,0.08); color: var(--green); border: 1px solid rgba(0,255,135,0.2); }
+ 
+    .mig-desc { color: var(--muted); font-size: 12px; }
+ 
+    /* ── PIPELINE ── */
+    .pipeline-wrap {
+      padding: 60px 0;
+      border-bottom: 1px solid var(--border);
+    }
+ 
+    .pipeline-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+ 
+    .pipeline-step {
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+ 
+    .step-connector {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+ 
+    .step-num {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: var(--green);
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+ 
+    .step-line {
+      width: 1px;
+      flex: 1;
+      min-height: 32px;
+      background: var(--border2);
+      margin: 4px 0;
+    }
+ 
+    .pipeline-step:last-child .step-line { display: none; }
+ 
+    .step-content {
+      padding-bottom: 32px;
+    }
+ 
+    .step-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+      margin-bottom: 4px;
+      padding-top: 6px;
+    }
+ 
+    .step-desc { font-size: 12px; color: var(--muted); line-height: 1.7; }
+ 
+    /* ── SKILLS ── */
+    .skills-wrap {
+      padding: 60px 0;
+      border-bottom: 1px solid var(--border);
+    }
+ 
+    .skills-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+ 
+    .skill-cell {
+      background: var(--surface);
+      padding: 20px 24px;
+    }
+ 
+    .skill-tag {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--green-bg);
+      color: var(--green);
+      border: 1px solid rgba(0,255,135,0.15);
+      margin-bottom: 8px;
+    }
+ 
+    .skill-cell p { font-size: 12px; color: var(--muted); }
+ 
+    /* ── FOOTER ── */
+    footer {
+      padding: 40px 0;
+      border-top: 1px solid var(--border);
+    }
+ 
+    footer .inner {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+ 
+    footer p { font-size: 12px; color: var(--muted); }
+ 
+    footer a { color: var(--green); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+ 
+    .footer-links { display: flex; gap: 20px; }
+ 
+    /* ── ANIMATIONS ── */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+ 
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+ 
+    @media (max-width: 640px) {
+      .arch-grid { grid-template-columns: 1fr; }
+      .skills-grid { grid-template-columns: 1fr 1fr; }
+      .hero-stats { gap: 24px; flex-wrap: wrap; }
+      nav ul { display: none; }
+    }
+  </style>
+</head>
+<body>
+ 
+<!-- NAV -->
+<nav>
+  <div class="inner">
+    <div class="nav-logo">GraphMigrate <span>/ neo4j migration cli</span></div>
+    <ul>
+      <li><a href="#terminal">Demo</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#migrations">Migrations</a></li>
+      <li><a href="#pipeline">CI/CD</a></li>
+      <li><a href="https://github.com/Shriya0-4/Neo4j-migration-tool" target="_blank">GitHub ↗</a></li>
+    </ul>
+  </div>
+</nav>
+ 
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-grid"></div>
+  <div class="container">
+    <div class="hero-eyebrow">· Go · Neo4j · GitHub Actions</div>
+    <h1>
+      Schema migrations<br>
+      for <span class="accent">graph</span> databases<span class="dim">.</span>
+    </h1>
+    <p class="hero-sub">
+      A production-grade CLI tool that manages versioned Cypher migrations against Neo4j , but built for graphs. Inspired by real-world
+      relationship renaming work done during a backend performance internship.
+    </p>
+    <div class="hero-actions">
+      <a href="https://github.com/Shriya0-4/Neo4j-migration-tool" target="_blank" class="btn btn-primary">
+        ↗ View on GitHub
+      </a>
+    </div>
+    <div class="hero-stats">
+      <div>
+        <span class="stat-val">6</span>
+        <span class="stat-label">Migrations</span>
+      </div>
+      <div>
+        <span class="stat-val">28k</span>
+        <span class="stat-label">Nodes migrated</span>
+      </div>
+      <div>
+        <span class="stat-val">166k</span>
+        <span class="stat-label">Relationships</span>
+      </div>
+      <div>
+        <span class="stat-val">4</span>
+        <span class="stat-label">CLI commands</span>
+      </div>
+    </div>
+  </div>
+</section>
+ 
+<!-- TERMINAL DEMO -->
+<section class="terminal-wrap fade-in" id="terminal">
+  <div class="container">
+    <div class="section-label">Live demo output</div>
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div>
+        <div class="dot dot-y"></div>
+        <div class="dot dot-g"></div>
+        <span class="terminal-title">graphmigrate migrate --verbose</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">$</span> <span class="t-cmd">make migrate</span></div>
+        <div><span class="t-dim">→ building graphmigrate...</span></div>
+        <div><span class="t-ok">✓ built: ./bin/graphmigrate</span></div>
+        <span class="t-blank"></span>
+        <div><span class="t-dim">23:37:10</span>  <span class="t-info">INFO</span>   connected to neo4j  <span class="t-dim">url=bolt://localhost:7687</span></div>
+        <span class="t-blank"></span>
+        <div><span class="t-bold t-info"> GraphMigrate</span></div>
+        <div><span class="t-dim">────────────────────────────────────────</span></div>
+        <div>  Total migrations : <span class="t-bold">6</span></div>
+        <div>  Applied          : <span class="t-ok">0</span></div>
+        <div>  Pending          : <span class="t-warn">6</span></div>
+        <div><span class="t-dim">────────────────────────────────────────</span></div>
+        <span class="t-blank"></span>
+        <div>  <span class="t-ok">[RUN]</span>  <span class="t-dim">0001</span>  add_genre_nodes</div>
+        <div>  <span class="t-ok">✓</span>  <span class="t-dim">0001</span>  add_genre_nodes                    <span class="t-dim">1708ms</span></div>
+        <div>  <span class="t-ok">[RUN]</span>  <span class="t-dim">0002</span>  add_unique_constraints</div>
+        <div>  <span class="t-ok">✓</span>  <span class="t-dim">0002</span>  add_unique_constraints             <span class="t-dim">203ms</span></div>
+        <div>  <span class="t-ok">[RUN]</span>  <span class="t-dim">0003</span>  add_imdb_rating_to_movies</div>
+        <div>  <span class="t-ok">✓</span>  <span class="t-dim">0003</span>  add_imdb_rating_to_movies          <span class="t-dim">4821ms</span></div>
+        <div>  <span class="t-ok">[RUN]</span>  <span class="t-dim">0004</span>  add_release_decade</div>
+        <div>  <span class="t-ok">✓</span>  <span class="t-dim">0004</span>  add_release_decade                 <span class="t-dim">3102ms</span></div>
+        <div>  <span class="t-ok">[RUN]</span>  <span class="t-dim">0005</span>  add_actor_director_labels</div>
+        <div>  <span class="t-ok">✓</span>  <span class="t-dim">0005</span>  add_actor_director_labels          <span class="t-dim">2341ms</span></div>
+        <div>  <span class="t-ok">[RUN]</span>  <span class="t-dim">0006</span>  rename_acted_in_to_performed_in</div>
+        <div>  <span class="t-ok">✓</span>  <span class="t-dim">0006</span>  rename_acted_in_to_performed_in    <span class="t-dim">18432ms</span></div>
+        <span class="t-blank"></span>
+        <div><span class="t-dim">────────────────────────────────────────</span></div>
+        <div>  <span class="t-ok">6 migration(s) applied successfully.</span></div>
+        <span class="t-blank"></span>
+        <div><span class="t-prompt">$</span> <span class="t-cmd">make status</span></div>
+        <span class="t-blank"></span>
+        <div><span class="t-bold t-info"> GraphMigrate — Status</span></div>
+        <div><span class="t-dim">────────────────────────────────────────────────────────────</span></div>
+        <div>  <span class="t-dim">VERSION   NAME                                    STATUS      APPLIED AT</span></div>
+        <div><span class="t-dim">────────────────────────────────────────────────────────────</span></div>
+        <div>  0001      add_genre_nodes                         <span class="t-ok">✓ applied</span>   2024-03-01 23:37:10</div>
+        <div>  0002      add_unique_constraints                  <span class="t-ok">✓ applied</span>   2024-03-01 23:37:12</div>
+        <div>  0003      add_imdb_rating_to_movies               <span class="t-ok">✓ applied</span>   2024-03-01 23:37:12</div>
+        <div>  0004      add_release_decade                      <span class="t-ok">✓ applied</span>   2024-03-01 23:37:17</div>
+        <div>  0005      add_actor_director_labels               <span class="t-ok">✓ applied</span>   2024-03-01 23:37:20</div>
+        <div>  0006      rename_acted_in_to_performed_in         <span class="t-ok">✓ applied</span>   2024-03-01 23:37:22</div>
+        <span class="t-blank"></span>
+        <div>  <span class="t-ok">6 applied</span><span class="t-dim">, 0 pending</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+ 
+<!-- ARCHITECTURE -->
+<section class="arch-wrap fade-in" id="architecture">
+  <div class="container">
+    <div class="section-label">How it's built</div>
+    <div class="arch-grid">
+      <div class="arch-cell">
+        <div class="arch-cell-label">CLI Layer</div>
+        <div class="arch-cell-title">Cobra Commands</div>
+        <p>Four subcommands — <code>migrate</code>, <code>status</code>, <code>rollback</code>, <code>unlock</code>. Global flags: <code>--verbose</code>, <code>--dry-run</code>, <code>--dir</code>. PersistentPreRunE wires config and driver before every command.</p>
+      </div>
+      <div class="arch-cell">
+        <div class="arch-cell-label">Core Engine</div>
+        <div class="arch-cell-title">Loader + Runner</div>
+        <p>Loader parses filenames, sorts by version, validates no duplicates, reads Cypher statements. Runner detects schema vs data migrations and routes to separate transaction strategies automatically.</p>
+      </div>
+      <div class="arch-cell">
+        <div class="arch-cell-label">Transaction Safety</div>
+        <div class="arch-cell-title">Dual-Path Execution</div>
+        <p>Neo4j forbids mixing DDL and data writes in one transaction. The runner detects CREATE/DROP INDEX keywords and uses per-statement transactions for schema migrations, single atomic transactions for data.</p>
+      </div>
+      <div class="arch-cell">
+        <div class="arch-cell-label">History Tracking</div>
+        <div class="arch-cell-title">Graph-Native State</div>
+        <p>Applied migrations are stored as <code>(:SchemaMigration)</code> nodes in Neo4j itself — version, name, timestamp, MD5 checksum. A <code>(:MigrationLock)</code> node prevents concurrent runs.</p>
+      </div>
+    </div>
+  </div>
+</section>
+ 
+<!-- MIGRATIONS TABLE -->
+<section class="migrations-wrap fade-in" id="migrations">
+  <div class="container">
+    <div class="section-label">Migration history</div>
+    <table class="mig-table">
+      <thead>
+        <tr>
+          <th>Version</th>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="mig-version">0001</td>
+          <td class="mig-name">add_genre_nodes</td>
+          <td><span class="mig-type type-data">Data</span></td>
+          <td class="mig-desc">Creates Genre nodes, wires movies via IN_GENRE relationships. Graph-idiomatic — genres as traversable nodes, not properties.</td>
+        </tr>
+        <tr>
+          <td class="mig-version">0002</td>
+          <td class="mig-name">add_unique_constraints</td>
+          <td><span class="mig-type type-schema">Schema</span></td>
+          <td class="mig-desc">Adds FULLTEXT indexes on Movie (title + tagline) and Person (name + bio). Range indexes on budget and revenue.</td>
+        </tr>
+        <tr>
+          <td class="mig-version">0003</td>
+          <td class="mig-name">add_imdb_rating_band</td>
+          <td><span class="mig-type type-both">Data + Schema</span></td>
+          <td class="mig-desc">Computes imdbRatingBand property (low/mid/high) on all 28k Movie nodes. Adds range index for fast faceted filtering.</td>
+        </tr>
+        <tr>
+          <td class="mig-version">0004</td>
+          <td class="mig-name">add_release_decade</td>
+          <td><span class="mig-type type-both">Data + Schema</span></td>
+          <td class="mig-desc">Computes releaseDecade string (e.g. "1990s") from integer year. Indexes it for decade-level analytics grouping.</td>
+        </tr>
+        <tr>
+          <td class="mig-version">0005</td>
+          <td class="mig-name">add_actor_director_labels</td>
+          <td><span class="mig-type type-both">Data + Schema</span></td>
+          <td class="mig-desc">Propagates Actor, Director, Writer, Producer secondary labels via relationship traversal. Adds label-specific indexes.</td>
+        </tr>
+        <tr>
+          <td class="mig-version">0006</td>
+          <td class="mig-name">rename_acted_in_to_performed_in</td>
+          <td><span class="mig-type type-data">Data</span></td>
+          <td class="mig-desc">Renames ACTED_IN → PERFORMED_IN across 166k relationships by creating new ones, copying properties, deleting old. Directly mirrors internship work.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+ 
+<!-- PIPELINE -->
+<section class="pipeline-wrap fade-in" id="pipeline">
+  <div class="container">
+    <div class="section-label">CI/CD Pipeline — GitHub Actions</div>
+    <div class="pipeline-steps">
+      <div class="pipeline-step">
+        <div class="step-connector"><div class="step-num">1</div><div class="step-line"></div></div>
+        <div class="step-content">
+          <div class="step-title">Lint & Unit Tests</div>
+          <div class="step-desc">go vet, gofmt check, and 9 unit tests on the loader package — no Neo4j required. Fast feedback on every push.</div>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-connector"><div class="step-num">2</div><div class="step-line"></div></div>
+        <div class="step-content">
+          <div class="step-title">Download Baseline Dump</div>
+          <div class="step-desc">Downloads recommendations-50.zip from a pinned GitHub Release asset. Unzips and renames to neo4j.dump for neo4j-admin compatibility.</div>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-connector"><div class="step-num">3</div><div class="step-line"></div></div>
+        <div class="step-content">
+          <div class="step-title">Load Dump into Docker Volume</div>
+          <div class="step-desc">Runs neo4j-admin database load in a throwaway container before Neo4j starts — avoids the stop/start container problem entirely.</div>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-connector"><div class="step-num">4</div><div class="step-line"></div></div>
+        <div class="step-content">
+          <div class="step-title">Pre-Migration Snapshot</div>
+          <div class="step-desc">Captures node counts by label, relationship counts by type, active indexes and constraints, and applied migration history to a structured text file.</div>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-connector"><div class="step-num">5</div><div class="step-line"></div></div>
+        <div class="step-content">
+          <div class="step-title">Run All 6 Migrations</div>
+          <div class="step-desc">Executes graphmigrate migrate --verbose. Each migration runs in the correct transaction mode — schema DDL in separate transactions, data changes atomically.</div>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-connector"><div class="step-num">6</div><div class="step-line"></div></div>
+        <div class="step-content">
+          <div class="step-title">Post-Migration Snapshot + Export</div>
+          <div class="step-desc">Captures the same state metrics after migration. Exports the full migrated database as a Cypher dump file.</div>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-connector"><div class="step-num">7</div><div class="step-line"></div></div>
+        <div class="step-content">
+          <div class="step-title">Generate Audit Report</div>
+          <div class="step-desc">Produces a full plain-text audit report: execution log, status table, state diff (node/relationship/constraint changes), and artifact inventory.</div>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-connector"><div class="step-num">8</div><div class="step-line"></div></div>
+        <div class="step-content">
+          <div class="step-title">Store Artifacts (90 days)</div>
+          <div class="step-desc">Uploads migration report, baseline dump zip, post-migration Cypher export, pre/post snapshots, and raw logs as GitHub Actions artifacts.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+ 
+<!-- SKILLS -->
+<section class="skills-wrap fade-in">
+  <div class="container">
+    <div class="section-label">Skills demonstrated</div>
+    <div class="skills-grid">
+      <div class="skill-cell">
+        <div class="skill-tag">Go</div>
+        <p>Cobra CLI, Neo4j Go driver, goroutines, interfaces, error wrapping, log/slog</p>
+      </div>
+      <div class="skill-cell">
+        <div class="skill-tag">Neo4j</div>
+        <p>Cypher queries, MERGE patterns, constraints, indexes, transaction types, graph modelling</p>
+      </div>
+      <div class="skill-cell">
+        <div class="skill-tag">CI/CD</div>
+        <p>GitHub Actions, Docker volumes, neo4j-admin, artifact storage, multi-job pipelines</p>
+      </div>
+      <div class="skill-cell">
+        <div class="skill-tag">Architecture</div>
+        <p>Modular package design, separation of concerns, domain-driven structs, testable code</p>
+      </div>
+      <div class="skill-cell">
+        <div class="skill-tag">Testing</div>
+        <p>Unit tests with no external dependencies, table-driven tests, filesystem mocking</p>
+      </div>
+      <div class="skill-cell">
+        <div class="skill-tag">DevOps</div>
+        <p>Makefile, .env config, systemd-ready binary, graceful shutdown, migration locking</p>
+      </div>
+    </div>
+  </div>
+</section>
+ 
+<!-- FOOTER -->
+<footer>
+  <div class="inner">
+    <p>Built by <a href="https://github.com/Shriya0-4" target="_blank">Shriya</a> · Backend Performance Internship Project</p>
+    <div class="footer-links">
+      <a href="https://github.com/Shriya0-4/Neo4j-migration-tool" target="_blank">GitHub</a>
+      <a href="https://github.com/Shriya0-4/Neo4j-migration-tool/actions" target="_blank">CI Runs</a>
+      <a href="https://github.com/Shriya0-4/Neo4j-migration-tool/releases" target="_blank">Releases</a>
+    </div>
+  </div>
+</footer>
+ 
+<script>
+  // Intersection observer for fade-in animations
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('visible');
+        observer.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.1 });
+ 
+  document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>
